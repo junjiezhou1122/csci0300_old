@@ -23,15 +23,56 @@
  */
 void update(int* cells, size_t width, size_t height, snake_t* snake_p,
             enum input_key input, int growing) {
-    // `update` should update the board, your snake's data, and global
-    // variables representing game information to reflect new state. If in the
-    // updated position, the snake runs into a wall or itself, it will not move
-    // and global variable g_game_over will be 1. Otherwise, it will be moved
-    // to the new position. If the snake eats food, the game score (`g_score`)
-    // increases by 1. This function assumes that the board is surrounded by
-    // walls, so it does not handle the case where a snake runs off the board.
-
-    // TODO: implement!
+    // Store current position
+    int prev_x = snake_head_x;
+    int prev_y = snake_head_y;
+    
+    // Update the direction based on input if it's valid
+    if (input != INPUT_NONE) {
+        snake_direction = input;
+    }
+    
+    // Calculate the new position based on direction
+    int new_x = snake_head_x;
+    int new_y = snake_head_y;
+    
+    if (snake_direction == INPUT_RIGHT) {
+        new_x += 1;
+    } else if (snake_direction == INPUT_LEFT) {
+        new_x -= 1;
+    } else if (snake_direction == INPUT_UP) {
+        new_y -= 1;
+    } else if (snake_direction == INPUT_DOWN) {
+        new_y += 1;
+    }
+    
+    // Check the next position
+    int next_cell_index = new_y * width + new_x;
+    int next_cell_content = cells[next_cell_index];
+    
+    // Check for collisions with wall (not with grass!)
+    if (next_cell_content & FLAG_WALL) {
+        // Collision with wall - game over
+        g_game_over = 1;
+        return;
+    }
+    
+    // Remove snake from current position before moving
+    cells[prev_y * width + prev_x] &= ~FLAG_SNAKE;
+    
+    // Update the head position
+    snake_head_x = new_x;
+    snake_head_y = new_y;
+    
+    // Place snake in new position before checking for food
+    cells[snake_head_y * width + snake_head_x] |= FLAG_SNAKE;
+    
+    // Check if snake ate food
+    if (next_cell_content & FLAG_FOOD) {
+        g_score += 1;
+        cells[next_cell_index] &= ~FLAG_FOOD;  // Remove the food
+        place_food(cells, width, height);      // Place new food
+    }
 }
 
 /** Sets a random space on the given board to food.

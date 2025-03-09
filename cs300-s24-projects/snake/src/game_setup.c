@@ -100,12 +100,12 @@ enum board_init_status initialize_game(int** cells_p, size_t* width_p,
    }
 
    // Initialize all global vaiables
-    snake_direction = 0;
-    snake_head_x = 0;
-    snake_head_y = 0;
+    snake_direction = INPUT_RIGHT;
+    snake_head_x = 2;
+    snake_head_y = 2;
     g_game_over = 0;
     g_score = 0;
-
+    place_food(*cells_p, *width_p, *height_p);
 
     return init_status;
 }
