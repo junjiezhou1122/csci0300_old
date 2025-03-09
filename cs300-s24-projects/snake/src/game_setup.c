@@ -90,9 +90,24 @@ enum board_init_status initialize_default_board(int** cells_p, size_t* width_p,
 enum board_init_status initialize_game(int** cells_p, size_t* width_p,
                                        size_t* height_p, snake_t* snake_p,
                                        char* board_rep) {
-    // TODO: implement!
 
-    return INIT_SUCCESS;
+    // initizalize the default board or other board
+    enum board_init_status init_status;
+   if (board_rep == NULL) {
+        init_status = initialize_default_board(cells_p, width_p, height_p);
+   } else {
+        init_status = decompress_board_str(cells_p, width_p, height_p, snake_p, board_rep);
+   }
+
+   // Initialize all global vaiables
+    snake_direction = 0;
+    snake_head_x = 0;
+    snake_head_y = 0;
+    g_game_over = 0;
+    g_score = 0;
+
+
+    return init_status;
 }
 
 /** Takes in a string `compressed` and initializes values pointed to by
