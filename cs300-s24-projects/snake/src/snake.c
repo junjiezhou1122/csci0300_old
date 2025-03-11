@@ -130,10 +130,10 @@ int main(int argc, char** argv) {
 
     initialize_window(width, height);
     
-    // TODO: implement the game loop here (Part 1A)!
+    // Game loop here (Part 1A)!
     while (!g_game_over) {
         usleep(200000);
-        update(cells, width, height, NULL, get_input(), snake_grows);
+        update(cells, width, height, &snake, get_input(), snake_grows);
         render_game(cells, width, height);
     }
 

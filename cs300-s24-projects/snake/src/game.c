@@ -24,25 +24,25 @@
 void update(int* cells, size_t width, size_t height, snake_t* snake_p,
             enum input_key input, int growing) {
     // Store current position
-    int prev_x = snake_head_x;
-    int prev_y = snake_head_y;
+    int prev_x = snake_p->snake_head_x;
+    int prev_y = snake_p->snake_head_y;
     
     // Update the direction based on input if it's valid
     if (input != INPUT_NONE) {
-        snake_direction = input;
+        snake_p->snake_direction = input;
     }
     
     // Calculate the new position based on direction
-    int new_x = snake_head_x;
-    int new_y = snake_head_y;
+    int new_x = snake_p->snake_head_x;
+    int new_y = snake_p->snake_head_y;
     
-    if (snake_direction == INPUT_RIGHT) {
+    if (snake_p->snake_direction == INPUT_RIGHT) {
         new_x += 1;
-    } else if (snake_direction == INPUT_LEFT) {
+    } else if (snake_p->snake_direction == INPUT_LEFT) {
         new_x -= 1;
-    } else if (snake_direction == INPUT_UP) {
+    } else if (snake_p->snake_direction == INPUT_UP) {
         new_y -= 1;
-    } else if (snake_direction == INPUT_DOWN) {
+    } else if (snake_p->snake_direction == INPUT_DOWN) {
         new_y += 1;
     }
     
@@ -61,11 +61,11 @@ void update(int* cells, size_t width, size_t height, snake_t* snake_p,
     cells[prev_y * width + prev_x] &= ~FLAG_SNAKE;
     
     // Update the head position
-    snake_head_x = new_x;
-    snake_head_y = new_y;
+    snake_p->snake_head_x = new_x;
+    snake_p->snake_head_y = new_y;
     
     // Place snake in new position before checking for food
-    cells[snake_head_y * width + snake_head_x] |= FLAG_SNAKE;
+    cells[snake_p->snake_head_y * width + snake_p->snake_head_x] |= FLAG_SNAKE;
     
     // Check if snake ate food
     if (next_cell_content & FLAG_FOOD) {

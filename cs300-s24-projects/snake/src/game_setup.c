@@ -109,17 +109,19 @@ enum board_init_status initialize_game(int** cells_p, size_t* width_p,
     // Only initialize game state and place food if board initialization succeeded
     if (init_status == INIT_SUCCESS) {
         // Initialize all global variables
-        snake_direction = INPUT_RIGHT;
         g_game_over = 0;
         g_score = 0;
+        
+        // Initialize snake direction
+        snake_p->snake_direction = INPUT_RIGHT;
         
         // Find the snake position in the board instead of assuming (2,2)
         int found_snake = 0;
         for (size_t y = 0; y < *height_p && !found_snake; y++) {
             for (size_t x = 0; x < *width_p; x++) {
                 if ((*cells_p)[y * (*width_p) + x] & FLAG_SNAKE) {
-                    snake_head_x = x;
-                    snake_head_y = y;
+                    snake_p->snake_head_x = x;
+                    snake_p->snake_head_y = y;
                     found_snake = 1;
                     break;
                 }
@@ -129,8 +131,8 @@ enum board_init_status initialize_game(int** cells_p, size_t* width_p,
         // If we can't find a snake (which shouldn't happen due to our validation),
         // default to (2,2)
         if (!found_snake) {
-            snake_head_x = 2;
-            snake_head_y = 2;
+            snake_p->snake_head_x = 2;
+            snake_p->snake_head_y = 2;
         }
         
         place_food(*cells_p, *width_p, *height_p);

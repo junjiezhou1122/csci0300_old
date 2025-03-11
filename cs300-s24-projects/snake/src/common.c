@@ -2,13 +2,7 @@
 
 #include <stdlib.h>
 
-// TODO: define global variables needed for your snake! (part 1A)
-int snake_head_x;
-int snake_head_y;
-enum input_key snake_direction;
-
-
-// Definition of global variables for game status.
+// Global variables for game status.
 int g_game_over;
 int g_score;
 
