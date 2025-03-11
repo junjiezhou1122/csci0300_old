@@ -25,6 +25,50 @@
  * You will need bitwise operations for this part of the assignment!
  */
 size_t mbslen(const char* bytes) {
-    // TODO: implement!
-    return 0;
+    // Check for NULL pointer
+    if (bytes == NULL) {
+        return -1;
+    }
+
+    size_t count = 0;
+    const unsigned char* str = (const unsigned char*)bytes;
+
+    while (*str != '\0') {
+        // Get the first byte
+        unsigned char byte = *str;
+
+        // Determine the number of bytes in this UTF-8 character
+        int bytes_in_char;
+        
+        if ((byte & 0x80) == 0) {          // 0xxxxxxx - 1 byte character
+            bytes_in_char = 1;
+        } else if ((byte & 0xE0) == 0xC0) { // 110xxxxx - 2 byte character
+            bytes_in_char = 2;
+        } else if ((byte & 0xF0) == 0xE0) { // 1110xxxx - 3 byte character
+            bytes_in_char = 3;
+        } else if ((byte & 0xF8) == 0xF0) { // 11110xxx - 4 byte character
+            bytes_in_char = 4;
+        } else {
+            // Invalid UTF-8 sequence
+            return -1;
+        }
+
+        // Validate continuation bytes (if any)
+        for (int i = 1; i < bytes_in_char; i++) {
+            // Check if we hit end of string prematurely
+            if (str[i] == '\0') {
+                return -1;
+            }
+            // Each continuation byte should start with 10xxxxxx
+            if ((str[i] & 0xC0) != 0x80) {
+                return -1;
+            }
+        }
+
+        // Move pointer to next character
+        str += bytes_in_char;
+        count++;
+    }
+
+    return count;
 }

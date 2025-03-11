@@ -120,8 +120,10 @@ enum board_init_status initialize_game(int** cells_p, size_t* width_p,
         for (size_t y = 0; y < *height_p && !found_snake; y++) {
             for (size_t x = 0; x < *width_p; x++) {
                 if ((*cells_p)[y * (*width_p) + x] & FLAG_SNAKE) {
-                    snake_p->snake_head_x = x;
-                    snake_p->snake_head_y = y;
+                    int head_x = x;
+                    int head_y = y;
+                    snake_p->snake_head_x = create_node(&head_x, sizeof(int));
+                    snake_p->snake_head_y = create_node(&head_y, sizeof(int));
                     found_snake = 1;
                     break;
                 }
@@ -131,8 +133,10 @@ enum board_init_status initialize_game(int** cells_p, size_t* width_p,
         // If we can't find a snake (which shouldn't happen due to our validation),
         // default to (2,2)
         if (!found_snake) {
-            snake_p->snake_head_x = 2;
-            snake_p->snake_head_y = 2;
+            int head_x = 2;
+            int head_y = 2;
+            snake_p->snake_head_x = create_node(&head_x, sizeof(int));
+            snake_p->snake_head_y = create_node(&head_y, sizeof(int));
         }
         
         place_food(*cells_p, *width_p, *height_p);

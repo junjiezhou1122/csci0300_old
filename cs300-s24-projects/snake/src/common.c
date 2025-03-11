@@ -6,6 +6,10 @@
 int g_game_over;
 int g_score;
 
+// Add these lines after the other global variable definitions
+char* g_name = NULL;
+size_t g_name_len = 0;
+
 /** Sets the seed for random number generation.
  * Arguments:
  *  - `seed`: the seed.

@@ -12,6 +12,7 @@ typedef struct node {
 } node_t;
 
 // function declarations
+node_t* create_node(void* data, size_t size);
 int length_list(node_t* head_list);
 void* get_first(node_t* head_list);
 void* get_last(node_t* head_list);
