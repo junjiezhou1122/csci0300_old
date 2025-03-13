@@ -83,7 +83,11 @@ void kernel(const char* command) {
         ptable[i].state = P_FREE;
     }
 
-    console_printf("WeensyOS has booted, but there are no processes running!\n");
+    process_setup(1, "allocator");
+    process_setup(2, "allocator2");
+    process_setup(3,"allocator3");
+    process_setup(4,"allocator4");
+    run(&ptable[1]); 
     while (true) {
         check_keyboard();
     }
@@ -384,7 +388,7 @@ void run(proc* p) {
 void memshow() {
     static unsigned last_ticks = 0;
     static int showing = 0;
-    static int show_virtual = 0;
+    static int show_virtual = 1;
 
     // switch to a new process every 0.25 sec
     if (last_ticks == 0 || ticks - last_ticks >= HZ / 2) {
@@ -404,4 +408,34 @@ void memshow() {
 
     extern void console_memviewer(proc* vmp, int show_virtual);
     console_memviewer(p, show_virtual);
+
+
+void copy_mappings(x86_64_pagetable* dst, x86_64_pagetable* src) {
+    // Copy all virtual memory mappings from `src` into `dst`
+    // for addresses in the range [0, MEMSIZE_VIRTUAL).
+    // You may assume that `dst` starts out empty (has no mappings).
+    
+    for (vmiter it(src); it.va() < MEMSIZE_VIRTUAL; it += PAGESIZE) {
+        if (it.present()) {
+            // Get the physical address and permissions from source
+            uintptr_t pa = it.pa();
+            int perm = it.perm();
+            
+            // Map the same physical address with the same permissions in destination
+            vmiter dst_it(dst, it.va());
+            dst_it.try_map(pa, perm);
+            
+            // For our grading purposes, print out the mapping information
+            log_printf("VA %p maps to PA %p with PERMS %p, %p, %p\n", 
+                      it.va(), 
+                      pa, 
+                      (perm & PTE_P) != 0, 
+                      (perm & PTE_W) != 0, 
+                      (perm & PTE_U) != 0);
+        }
+    }
+    
+    // After this function completes, for any virtual address `va` with
+    // 0 <= va < MEMSIZE_VIRTUAL, `dst` and `src` should map that va
+    // to the same physical address with the same permissions.
 }

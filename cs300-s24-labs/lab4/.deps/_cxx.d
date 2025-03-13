@@ -1,0 +1,1 @@
+DEP_CXX:=x86_64-linux-gnu-g++-13  -I. -MD -MF .deps/.d -MP  -m64 -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-3dnow -ffreestanding -fno-omit-frame-pointer -fno-pic -Wall -W -Wshadow -Wno-format -Wno-unused-parameter -Wstack-usage=1024 -fno-stack-protector -std=gnu++1z -fno-exceptions -fno-rtti -gdwarf -ffunction-sections  _  -std=gnu++1z -Wall -W

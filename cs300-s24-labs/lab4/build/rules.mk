@@ -14,7 +14,7 @@ CXX     := $(shell build/findgcc.sh $(CXX))
 endif
 else
 CC      = $(CCPREFIX)cc
-CXX     = $(CCPREFIX)g++-11
+CXX     = $(CCPREFIX)g++-13
 endif
 LD      = $(CCPREFIX)ld
 OBJCOPY = $(CCPREFIX)objcopy
