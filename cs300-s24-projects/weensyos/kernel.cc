@@ -127,17 +127,38 @@ void* kalloc(size_t sz) {
         return nullptr;
     }
 
-    while (next_alloc_pa < MEMSIZE_PHYSICAL) {
-        uintptr_t pa = next_alloc_pa;
-        next_alloc_pa += PAGESIZE;
-
-        if (allocatable_physical_address(pa)
-            && !pages[pa / PAGESIZE].used()) {
-            pages[pa / PAGESIZE].refcount = 1;
+    // Static variable to remember where we left off (optimization)
+    static size_t last_checked_page = 0;
+    
+    // Start searching from where we left off last time
+    size_t i = last_checked_page;
+    
+    // Do a full scan of all pages, starting from last_checked_page
+    for (size_t count = 0; count < NPAGES; ++count) {
+        // Wrap around if we reach the end
+        if (i >= NPAGES) {
+            i = 0;
+        }
+        
+        uintptr_t pa = i * PAGESIZE;
+        
+        // Check if this page is allocatable and free
+        if (allocatable_physical_address(pa) && !pages[i].used()) {
+            // Remember this position for next time (plus one)
+            last_checked_page = i + 1;
+            
+            // Mark the page as used
+            pages[i].refcount = 1;
+            // Initialize the page memory
             memset((void*) pa, 0xCC, PAGESIZE);
             return (void*) pa;
         }
+        
+        // Move to next page
+        i++;
     }
+    
+    // No free pages found
     return nullptr;
 }
 
@@ -147,9 +168,27 @@ void* kalloc(size_t sz) {
 //    If `kptr == nullptr` does nothing.
 
 void kfree(void* kptr) {
-    // Placeholder code below - you will have to implement `kfree`!
-    (void) kptr;
-    assert(false);
+    // Do nothing if nullptr is passed
+    if (!kptr) {
+        return;
+    }
+    
+    // Calculate the page number for this physical address
+    uintptr_t pa = (uintptr_t)kptr;
+    size_t pageindex = pa / PAGESIZE;
+    
+    // Sanity check: ensure this is a valid page address
+    assert(pageindex < NPAGES);
+    
+    // Sanity check: ensure the page is currently in use
+    assert(pages[pageindex].refcount > 0);
+    
+    // Decrement the reference count
+    pages[pageindex].refcount--;
+    
+    // If reference count reaches zero, the page is now free
+    // No need to do anything else since kalloc will check the refcount
+    // when looking for free pages
 }
 
 
@@ -256,8 +295,8 @@ void process_setup(pid_t pid, const char* program_name) {
     vmiter stack_it(ptable[pid].pagetable, stack_addr);
     stack_it.map((uintptr_t)physical_stack, PTE_P | PTE_W | PTE_U);
 
-    // Set %rsp to the start of the stack.
-    ptable[pid].regs.reg_rsp = stack_addr + PAGESIZE;
+    // Set %rsp to somewhere within the mapped stack page.
+    ptable[pid].regs.reg_rsp = stack_addr + PAGESIZE - 8;
 
     // Set %rip to the entry point
     ptable[pid].regs.reg_rip = loader.entry();
@@ -357,6 +396,9 @@ int syscall_page_alloc(uintptr_t addr);
 pid_t syscall_fork();
 void syscall_exit();
 
+// Add forward declaration for cleanup_child to allow its use in syscall_fork.
+static void cleanup_child(proc* child);
+
 uintptr_t syscall(regstate* regs) {
     // Copy the saved registers into the `current` process descriptor.
     current->regs = *regs;
@@ -410,7 +452,7 @@ uintptr_t syscall(regstate* regs) {
 //    Helper function that handles the SYSCALL_PAGE_ALLOC system call.
 //    This function implement the specification for `sys_page_alloc`
 //    in `u-lib.hh` (but in the stencil code, it does not - you will
-//    have to change this).
+//    have to change this at some point).
 
 int syscall_page_alloc(uintptr_t addr) {
     assert(addr % PAGESIZE == 0);
@@ -474,7 +516,9 @@ pid_t syscall_fork() {
             child_it += PAGESIZE;
             continue;
         }
-        child_it.map(kernel_it.pa(), kernel_it.perm());
+        // Critical fix: copy kernel mappings WITHOUT user-access permission
+        // This ensures kernel memory is protected from user processes
+        child_it.map(kernel_it.pa(), kernel_it.perm() & ~PTE_U);
         child_it += PAGESIZE;
     }
     
@@ -497,7 +541,7 @@ pid_t syscall_fork() {
             // For writable pages, allocate a new physical page and copy contents
             void* child_page = kalloc(PAGESIZE);
             if (!child_page) {
-                // TODO: Clean up already allocated pages
+                cleanup_child(child);
                 return -1;  // Failed to allocate memory
             }
             
@@ -506,7 +550,12 @@ pid_t syscall_fork() {
             
             // Map the page in the child's page table with the same permissions
             vmiter child_mem_it(child->pagetable, parent_it.va());
-            child_mem_it.map((uintptr_t)child_page, parent_it.perm());
+            int r = child_mem_it.try_map((uintptr_t)child_page, parent_it.perm());
+            if (r != 0) {
+                kfree(child_page);
+                cleanup_child(child);
+                return -1;
+            }
         } else {
             // For read-only pages, share the physical page between parent and child
             
@@ -516,7 +565,13 @@ pid_t syscall_fork() {
             
             // Map the same physical page in the child's page table
             vmiter child_mem_it(child->pagetable, parent_it.va());
-            child_mem_it.map(pa, parent_it.perm());
+            int r = child_mem_it.try_map(pa, parent_it.perm());
+            if (r != 0) {
+                // If mapping fails, roll back reference count and cleanup.
+                pages[pa / PAGESIZE].refcount--;
+                cleanup_child(child);
+                return -1;
+            }
         }
     }
     
@@ -534,8 +589,46 @@ pid_t syscall_fork() {
 //    Handles the SYSCALL_EXIT system call. This function
 //    implements the specification for `sys_exit` in `u-lib.hh`.
 void syscall_exit() {
-    // Implement for Step 7!
-    panic("Unexpected system call %ld!\n", SYSCALL_EXIT);
+    // Free user-accessible pages (code, data, heap, stack), but skip the console.
+    for (vmiter it(current->pagetable, PROC_START_ADDR); it.va() < MEMSIZE_VIRTUAL; it += PAGESIZE) {
+        if (it.present() && it.va() != CONSOLE_ADDR) {
+            kfree((void*)it.pa());
+        }
+    }
+
+    // Free all page table pages allocated for the process using ptiter.
+    // Note: ptiter will visit all lower-level page table pages (levels 1-3).
+    for (ptiter it(current->pagetable); it.active(); it.next()) {
+        kfree(it.kptr());
+    }
+    
+    // Free the root page table (level-4 page).
+    kfree(current->pagetable);
+
+    // Mark the process as free.
+    current->state = P_FREE;
+    
+    // Switch to another process.
+    schedule();
+}
+
+// Helper cleanup routine for sys_fork failure.
+// Free all user pages (except the console), free lower-level page table pages, and free the root page table.
+static void cleanup_child(proc* child) {
+    // Free user pages in child (skip console)
+    for (vmiter it(child->pagetable, PROC_START_ADDR); it.va() < MEMSIZE_VIRTUAL; it += PAGESIZE) {
+        if (it.present() && it.va() != CONSOLE_ADDR) {
+            kfree((void*)it.pa());
+        }
+    }
+    // Free lower-level page table pages allocated for child.
+    for (ptiter it(child->pagetable); it.active(); it.next()) {
+        kfree(it.kptr());
+    }
+    // Free root page table.
+    kfree(child->pagetable);
+    child->pagetable = nullptr; // Prevent accidental reuse.
+    child->state = P_FREE;
 }
 
 // schedule
