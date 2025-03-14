@@ -492,19 +492,32 @@ pid_t syscall_fork() {
             continue;  // Skip unmapped pages
         }
         
-        // Allocate a new physical page for the child
-        void* child_page = kalloc(PAGESIZE);
-        if (!child_page) {
-            // TODO: Clean up already allocated pages
-            return -1;  // Failed to allocate memory
+        // Check if the page is writable
+        if (parent_it.perm() & PTE_W) {
+            // For writable pages, allocate a new physical page and copy contents
+            void* child_page = kalloc(PAGESIZE);
+            if (!child_page) {
+                // TODO: Clean up already allocated pages
+                return -1;  // Failed to allocate memory
+            }
+            
+            // Copy the page contents
+            memcpy(child_page, (void*)parent_it.pa(), PAGESIZE);
+            
+            // Map the page in the child's page table with the same permissions
+            vmiter child_mem_it(child->pagetable, parent_it.va());
+            child_mem_it.map((uintptr_t)child_page, parent_it.perm());
+        } else {
+            // For read-only pages, share the physical page between parent and child
+            
+            // Increment the reference count for the shared page
+            uintptr_t pa = parent_it.pa();
+            pages[pa / PAGESIZE].refcount++;
+            
+            // Map the same physical page in the child's page table
+            vmiter child_mem_it(child->pagetable, parent_it.va());
+            child_mem_it.map(pa, parent_it.perm());
         }
-        
-        // Copy the page contents
-        memcpy(child_page, (void*)parent_it.pa(), PAGESIZE);
-        
-        // Map the page in the child's page table with the same permissions
-        vmiter child_mem_it(child->pagetable, parent_it.va());
-        child_mem_it.map((uintptr_t)child_page, parent_it.perm());
     }
     
     // Set the return value for the child process (0)
