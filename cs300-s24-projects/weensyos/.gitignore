@@ -9,3 +9,4 @@ weensyos1.tar.gz
 config.mk
 .idea
 .deps
+.qodo

@@ -65,13 +65,22 @@ void kernel(const char* command) {
     // Clear screen.
     console_clear();
 
-    // (re-)Initialize the kernel page table.
+    
+// (re-)Initialize the kernel page table.
     for (vmiter it(kernel_pagetable); it.va() < MEMSIZE_PHYSICAL; it += PAGESIZE) {
-        if (it.va() != 0) {
-            it.map(it.va(), PTE_P | PTE_W | PTE_U);
-        } else {
+        if (it.va() == 0) {
             // nullptr is inaccessible even to the kernel
             it.map(it.va(), 0);
+        } else if (it.va() >= PROC_START_ADDR) {
+            // Memory above PROC_START_ADDR should not be mapped in kernel_pagetable
+            // (Each process will get its own mappings for this region)
+            it.map(it.va(), PTE_P | PTE_W | PTE_U);
+        } else if (it.va() == CONSOLE_ADDR) {
+            // Console memory needs to be accessible by both kernel and user processes
+            it.map(it.va(), PTE_P | PTE_W | PTE_U);
+        } else {
+            // Regular kernel memory - accessible only to the kernel
+            it.map(it.va(), PTE_P | PTE_W);
         }
     }
 
@@ -154,50 +163,106 @@ void process_setup(pid_t pid, const char* program_name) {
 
     // Initialize this process's page table. Notice how we are currently
     // sharing the kernel's page table.
-    ptable[pid].pagetable = kernel_pagetable;
+    // Allocate a new, empty page table instead of kernel pagetable
+    ptable[pid].pagetable = (x86_64_pagetable *) kalloc(PAGESIZE);
+    if (!ptable[pid].pagetable) {
+        // Handle allocation failure
+        return;
+    }
+    memset(ptable[pid].pagetable, 0, PAGESIZE);
+
+    // Copy kernel table into this new pagetable!
+    vmiter kernel_it(kernel_pagetable, 0);
+    vmiter process_it(ptable[pid].pagetable, 0);
+
+    // Map kernel space only (not process space)
+    // This ensures kernel code and data are accessible during system calls
+    for (; kernel_it.va() < PROC_START_ADDR; kernel_it += PAGESIZE) {
+        // Skip non-existent mappings
+        if (!kernel_it.present()) {
+            process_it += PAGESIZE;
+            continue;
+        }
+        
+        // Copy kernel mappings
+        process_it.map(kernel_it.pa(), kernel_it.perm());
+        process_it += PAGESIZE;
+    }
+
+    // Also map the console
+    vmiter console_kernel_it(kernel_pagetable, CONSOLE_ADDR);
+    vmiter console_process_it(ptable[pid].pagetable, CONSOLE_ADDR);
+    console_process_it.map(console_kernel_it.pa(), console_kernel_it.perm());
 
     // Initialize `program_loader`.
-    // The `program_loader` is an iterator that visits segments of executables.
     program_loader loader(program_name);
 
-    // Using the loader, we're going to start loading segments of the program binary into memory
-    // (recall that an executable has code/text segment, data segment, etc).
-
-    // First, for each segment of the program, we allocate page(s) of memory.
+    // For each segment of the program
     for (loader.reset(); loader.present(); ++loader) {
         for (uintptr_t a = round_down(loader.va(), PAGESIZE);
-             a < loader.va() + loader.size();
-             a += PAGESIZE) {
-            // `a` is the virtual address of the current segment's page.
-            assert(!pages[a / PAGESIZE].used());
-            // Read the description on the `pages` array if you're confused about what it is.
-            // Here, we're directly getting the page that has the same physical address as the
-            // virtual address `a`, and claiming that page by incrementing its reference count
-            // (you will have to change this later).
-            pages[a / PAGESIZE].refcount = 1;
+            a < loader.va() + loader.size();
+            a += PAGESIZE) {
+            // Allocate a physical page using kalloc
+            void* physical_page = kalloc(PAGESIZE);
+            if (!physical_page) {
+                // Handle allocation failure
+                return;
+            }
+            
+            // Clear the physical page 
+            memset(physical_page, 0, PAGESIZE);
+            
+            // Map the physical page to the virtual address in the process's page table
+            // Set appropriate permissions (read-only or read-write)
+            int perm = PTE_P | PTE_U;  // Always present and user-accessible
+            if (loader.writable()) {
+                perm |= PTE_W;         // Add write permission only if segment is writable
+            }
+            
+            vmiter segment_it(ptable[pid].pagetable, a);
+            segment_it.map((uintptr_t)physical_page, perm);
         }
     }
 
-    // We now copy instructions and data into memory that we just allocated.
+    // Copy program data from loader to mapped physical pages
     for (loader.reset(); loader.present(); ++loader) {
-        memset((void*) loader.va(), 0, loader.size());
-        memcpy((void*) loader.va(), loader.data(), loader.data_size());
+        for (size_t i = 0; i < loader.size(); ++i) {
+            // Get the virtual address in the process's address space
+            uintptr_t va = loader.va() + i;
+            
+            // Find corresponding physical address using vmiter
+            vmiter it(ptable[pid].pagetable, va);
+            if (it.present()) {
+                // Copy program data directly to the physical address
+                if (i < loader.data_size()) {
+                    *(char*)it.pa() = loader.data()[i];
+                }
+            }
+        }
     }
 
-    // Set %rip and mark the entry point of the code.
-    ptable[pid].regs.reg_rip = loader.entry();
-
-    // We also need to allocate a page for the stack.
+    // Allocate stack page
     uintptr_t stack_addr = PROC_START_ADDR + PROC_SIZE * pid - PAGESIZE;
-    assert(!pages[stack_addr / PAGESIZE].used());
-    // Again, we're using the physical page that has the same address as the `stack_addr` to
-    // maintain the one-to-one mapping between physical and virtual memory (you will have to change
-    // this later).
-    pages[stack_addr / PAGESIZE].refcount = 1;
+    void* physical_stack = kalloc(PAGESIZE);
+    if (!physical_stack) {
+        // Handle allocation failure
+        return;
+    }
+    
+    // Clear the stack
+    memset(physical_stack, 0, PAGESIZE);
+    
+    // Map the stack page with user permissions
+    vmiter stack_it(ptable[pid].pagetable, stack_addr);
+    stack_it.map((uintptr_t)physical_stack, PTE_P | PTE_W | PTE_U);
+
     // Set %rsp to the start of the stack.
     ptable[pid].regs.reg_rsp = stack_addr + PAGESIZE;
 
-    // Finally, mark the process as runnable.
+    // Set %rip to the entry point
+    ptable[pid].regs.reg_rip = loader.entry();
+
+    // Mark the process as runnable
     ptable[pid].state = P_RUNNABLE;
 }
 
@@ -349,11 +414,23 @@ uintptr_t syscall(regstate* regs) {
 
 int syscall_page_alloc(uintptr_t addr) {
     assert(addr % PAGESIZE == 0);
-    assert(!pages[addr / PAGESIZE].used());
-    // Currently we're simply using the physical page that has the same address
-    // as `addr` (which is a virtual address).
-    pages[addr / PAGESIZE].refcount = 1;
-    memset((void*) addr, 0, PAGESIZE);
+    
+    // Allocate a new physical page
+    void* physical_page = kalloc(PAGESIZE);
+    if (!physical_page) {
+        return -1; // Allocation failed
+    }
+    
+    // Map the physical page to the virtual address in the current process's page table
+    vmiter it(current->pagetable, addr);
+    int r = it.try_map((uintptr_t)physical_page, PTE_P | PTE_W | PTE_U);
+    if (r != 0) {
+        // If mapping failed, free the page and return error
+        kfree(physical_page);
+        return -1;
+    }
+    
+    // The page is already zeroed by kalloc + memset
     return 0;
 }
 
