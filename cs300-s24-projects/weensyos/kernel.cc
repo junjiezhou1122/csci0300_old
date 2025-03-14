@@ -438,8 +438,83 @@ int syscall_page_alloc(uintptr_t addr) {
 //    Handles the SYSCALL_FORK system call. This function
 //    implements the specification for `sys_fork` in `u-lib.hh`.
 pid_t syscall_fork() {
-    // Implement for Step 5!
-    panic("Unexpected system call %ld!\n", SYSCALL_FORK);
+    // Find a free process slot
+    pid_t child_pid = -1;
+    for (pid_t i = 1; i < NPROC; ++i) {
+        if (ptable[i].state == P_FREE) {
+            child_pid = i;
+            break;
+        }
+    }
+    
+    // No free process slot found
+    if (child_pid == -1) {
+        return -1;
+    }
+    
+    // Initialize the child process
+    proc* child = &ptable[child_pid];
+    *child = *current;  // Copy most state from parent
+    child->pid = child_pid;
+    
+    // Allocate a new page table for the child
+    child->pagetable = (x86_64_pagetable*) kalloc(PAGESIZE);
+    if (!child->pagetable) {
+        return -1;  // Failed to allocate page table
+    }
+    memset(child->pagetable, 0, PAGESIZE);
+    
+    // Copy kernel mappings (same as in process_setup)
+    vmiter kernel_it(kernel_pagetable, 0);
+    vmiter child_it(child->pagetable, 0);
+    
+    // Map kernel space only (not process space)
+    for (; kernel_it.va() < PROC_START_ADDR; kernel_it += PAGESIZE) {
+        if (!kernel_it.present()) {
+            child_it += PAGESIZE;
+            continue;
+        }
+        child_it.map(kernel_it.pa(), kernel_it.perm());
+        child_it += PAGESIZE;
+    }
+    
+    // Map the console
+    vmiter console_kernel_it(kernel_pagetable, CONSOLE_ADDR);
+    vmiter console_child_it(child->pagetable, CONSOLE_ADDR);
+    console_child_it.map(console_kernel_it.pa(), console_kernel_it.perm());
+    
+    // Copy parent's user memory to child
+    for (vmiter parent_it(current->pagetable, PROC_START_ADDR);
+         parent_it.va() < MEMSIZE_VIRTUAL;
+         parent_it += PAGESIZE) {
+        
+        if (!parent_it.present()) {
+            continue;  // Skip unmapped pages
+        }
+        
+        // Allocate a new physical page for the child
+        void* child_page = kalloc(PAGESIZE);
+        if (!child_page) {
+            // TODO: Clean up already allocated pages
+            return -1;  // Failed to allocate memory
+        }
+        
+        // Copy the page contents
+        memcpy(child_page, (void*)parent_it.pa(), PAGESIZE);
+        
+        // Map the page in the child's page table with the same permissions
+        vmiter child_mem_it(child->pagetable, parent_it.va());
+        child_mem_it.map((uintptr_t)child_page, parent_it.perm());
+    }
+    
+    // Set the return value for the child process (0)
+    child->regs.reg_rax = 0;
+    
+    // Mark the child process as runnable
+    child->state = P_RUNNABLE;
+    
+    // Return the child's PID to the parent
+    return child_pid;
 }
 
 // syscall_exit()
