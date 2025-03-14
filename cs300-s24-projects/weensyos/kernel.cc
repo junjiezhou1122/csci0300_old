@@ -242,7 +242,7 @@ void process_setup(pid_t pid, const char* program_name) {
     }
 
     // Allocate stack page
-    uintptr_t stack_addr = PROC_START_ADDR + PROC_SIZE * pid - PAGESIZE;
+    uintptr_t stack_addr = MEMSIZE_VIRTUAL - PAGESIZE;
     void* physical_stack = kalloc(PAGESIZE);
     if (!physical_stack) {
         // Handle allocation failure
